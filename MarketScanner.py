@@ -13,17 +13,17 @@ import time
 
 class TestApp(EWrapper,EClient):
 
-    def __init__(self, subscription: ScannerSubscription): #symbol, secType,exchange,currency,primaryExchange):
+    def __init__(self, subscription: ScannerSubscription): #ticker, secType,exchange,currency,primaryExchange):
 
         EClient.__init__(self,self)
         self.orderId = 0
         self.date = datetime.date.today().strftime("%d%m%Y")
-        self.data = pd.DataFrame(columns=["rank", "symbol", "sec_type"])
+        self.data = pd.DataFrame(columns=["rank", "ticker", "sec_type"])
         self.subscription = subscription
 
     def create_csv_files(self):
-        path = "/Users/alperoner/PycharmProjects/PMP/Scanner/{}_scanner.csv".format(self.date)
-        levels = ["Rank", "Symbol","Sec_Type"]
+        path = "/Users/alperoner/PycharmProjects/PMP/IntradayMomentum/Scanner/{}_scanner.csv".format(self.date)
+        levels = ["rank", "ticker","sec_type"]
         df = pd.DataFrame(columns=levels)
         df.to_csv(path, index=False)
 
@@ -41,9 +41,9 @@ class TestApp(EWrapper,EClient):
         super().scannerData(reqId, rank, contractDetails, distance, benchmark, projection, legsStr)
 
         if contractDetails.contract.symbol.isalnum():
-            path = "/Users/alperoner/PycharmProjects/PMP/Scanner/{}_scanner.csv".format(self.date)
-            row = {"rank":[rank+1], "symbol":[contractDetails.contract.symbol], "sec_type":[contractDetails.contract.secType]}
-            self.append_dict_as_row(path, row, ["rank", "symbol", "sec_type"])
+            path = "/Users/alperoner/PycharmProjects/PMP/IntradayMomentum/Scanner/{}_scanner.csv".format(self.date)
+            row = {"rank":rank+1, "ticker":contractDetails.contract.symbol, "sec_type":contractDetails.contract.secType}
+            self.append_dict_as_row(path, row, ["rank", "ticker", "sec_type"])
 
 
     def scannerDataEnd(self, reqId: int):
@@ -59,8 +59,8 @@ class TestApp(EWrapper,EClient):
 
     def nextValidId(self, orderId: int):
         super().nextValidId(orderId)
-        self.nextorderId = orderId + 1
-        return self.nextorderId
+        self.orderId = orderId + 1
+        return self.orderId
 
 
 
@@ -87,6 +87,7 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 ## Add a if clause to check if market is closed
 ##Possible market open or closed can be a function in tws api then you can use it to decrease the code to 2 lines

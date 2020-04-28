@@ -1,3 +1,4 @@
+import concurrent.futures
 import datetime
 from csv import DictWriter
 from ibapi.client import EClient, TickerId, TickAttrib, BarData
@@ -7,16 +8,23 @@ import pandas as pd
 from ibapi.ticktype import TickTypeEnum
 import time
 import threading
+import os
 
 class HistoricalData(EWrapper, EClient):
 
-    symbols = []
-    field_names = ["Date", "Open", "High", "Low", "Close", "Volume"]
-    count = 0
+    tickers = []
+    field_names = ["date", "open", "high", "low", "close", "volume"]
 
-    def __init__(self):
+
+
+    def __init__(self, folder_path: str):
         EClient.__init__(self,self)
-        self.nextorderId = 1
+        self.date = datetime.date.today().strftime("%d%m%Y")
+        self.orderId = 1
+        self.forMomentumStrategy = False
+        self.count = 0
+        self.folder_path = folder_path
+
 
 
     def append_dict_as_row(self,file_name, dict_of_elem, field_names):
@@ -31,54 +39,71 @@ class HistoricalData(EWrapper, EClient):
         print("Error: ", reqId, " ", errorCode, " ", errorString)
 
     def historicalData(self, reqId: int, bar: BarData):
-        path = "/Users/alperoner/PycharmProjects/PMP/History/{}_history.csv".format(self.symbols[self.count])
-        row = {"Date": bar.date, "Open": bar.open, "High": bar.high, "Low": bar.low, "Close": bar.close, "Volume": bar.volume}
+        file_path = "{}_history.csv".format(self.tickers[self.count])
+        path = os.path.join(self.folder_path, file_path)
+        row = {"date": bar.date, "open": bar.open, "high": bar.high, "low": bar.low, "close": bar.close, "volume": bar.volume}
+
         self.append_dict_as_row(path,row,self.field_names)
 
     def historicalDataEnd(self, reqId:int, start:str, end:str):
         self.count += 1
-        if self.count == len(self.symbols):
+        if self.count == len(self.tickers):
             self.done = True
 
 
     def nextValidId(self, orderId: int):
         super().nextValidId(orderId)
-        self.nextorderId = orderId + 1
+        self.orderId = orderId + 1
+        return self.orderId
         #print('The next valid order id is: ', self.nextorderId)
 
 
-def getContracts(symbols: [str]) -> [Contract]:
+    def getContracts(self, tickers: [str]) -> [Contract]:
 
-    contract_list = []
+        contract_list = []
 
-    for symbol in symbols:
-        contract = Contract()
-        contract.symbol = symbol
-        contract.secType = "STK"
-        contract.exchange = "SMART"
-        contract.currency = "USD"
-        contract_list.append(contract)
+        for ticker in tickers:
+            contract = Contract()
+            contract.symbol = ticker
+            contract.secType = "STK"
+            contract.exchange = "SMART"
+            contract.currency = "USD"
+            contract_list.append(contract)
 
-    return contract_list
+        return contract_list
 
-def create_csv_files(symbols: [str]) -> [str]:
-    csv_paths = []
-    for symbol in symbols:
-        path = "/Users/alperoner/PycharmProjects/PMP/History/{}_history.csv".format(symbol)
-        levels = ["Date", "Open", "High", "Low", "Close", "Volume"]
-        df = pd.DataFrame(columns=levels)
-        df.to_csv(path,index=False)
-        csv_paths.append(path)
-    return csv_paths
+    def create_csv_files(self, tickers: [str], folder_path: str) -> [str]:
+        csv_paths = []
+        for ticker in tickers:
+            filepath = "{}_history.csv".format(ticker)
+            path = os.path.join(folder_path, filepath)
+            #path = "/Users/alperoner/PycharmProjects/PMP/History/{}_history.csv".format(ticker)
+            levels = ["date", "open", "high", "low", "close", "volume"]
+            df = pd.DataFrame(columns=levels)
+            df.to_csv(path,index=False)
+            csv_paths.append(path)
+        return csv_paths
 
 
-def main(symbols, durationString, barSizeSetting, time_from_today = None):
+def main(durationString:str, barSizeSetting:str,
+         folder_path: str= "/Users/alperoner/PycharmProjects/PMP/History",
+         forMomentum = False, time_from_today = None):
 
-    app = HistoricalData()
+
+    if forMomentum:
+        tickers_path = "/Users/alperoner/PycharmProjects/PMP/IntradayMomentum/Scanner/{}_scanner.csv".format(datetime.date.today().strftime("%d%m%Y"))
+        data = pd.read_csv(tickers_path)
+        tickers = data.ticker.values[0:5]
+    else:
+        data = pd.read_csv("/Users/alperoner/PycharmProjects/PMP/sp500.csv")
+        tickers = data.ticker.values[10:20]
+
+
+    app = HistoricalData(folder_path=folder_path)
     app.connect("127.0.0.1", 7497, 1)
-    app.symbols = symbols
-    paths = create_csv_files(symbols)
-    contracts = getContracts(symbols)
+    app.tickers = tickers
+    paths = app.create_csv_files(tickers, folder_path= folder_path)
+    contracts = app.getContracts(tickers)
 
     if time_from_today is None:
         queryTime = ""
@@ -87,12 +112,11 @@ def main(symbols, durationString, barSizeSetting, time_from_today = None):
 
 
     for contract in contracts:
-        app.reqHistoricalData(app.nextorderId, contract, queryTime, durationString, barSizeSetting, "MIDPOINT", 1, 1, False, [])
+        app.reqHistoricalData(app.orderId, contract, queryTime, durationString, barSizeSetting, "MIDPOINT", 1, 1, False, [])
         #endDateTime, The request's end date and time (the empty string indicates current present moment).
         #durationString, The amount of time (or Valid Duration String units) to go back from the request's given end date and time.
         #barSizeSetting, The data's granularity or Valid Bar Sizes
-
-        app.nextValidId(app.nextorderId)
+        app.nextValidId(app.orderId)
 
     app.run()
     app.disconnect()
@@ -106,14 +130,27 @@ def view(paths):
         data = pd.read_csv(path)
         print(data.head())
 
+
 if __name__ == "__main__":
-    sp500 = pd.read_csv("/Users/alperoner/PycharmProjects/PMP/sp500.csv")
-    symbols = sp500.ticker.values[150:200]
-    #paths = main(symbols= symbols, durationString="30 Y", barSizeSetting="1 month")
+
+    ##If threading goes wrong
+    #paths = main(tickers= tickers, durationString="30 Y", barSizeSetting="1 month")
     #view(paths)
 
-    x = threading.Thread(target=main, args=(symbols,"30 Y","1 month"))
-    x.start()
-    paths = x.join()
-    view(paths)
+    ## We can turn this into pool with mapping
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        args = ["30 Y", "1 month"]
+        future = executor.submit(lambda p: main(*p), args)
+        return_value = future.result()
+        #view(return_value)
 
+
+if __name__ == "__main__":
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        args = ["1 D", "1 day", "/Users/alperoner/PycharmProjects/PMP/IntradayMomentum/DailyPrices", True]
+        future = executor.submit(lambda p: main(*p), args)
+        return_value = future.result()
+    #x = threading.Thread(target=main, args=("30 Y","1 month"))
+    #x.start()
+
+    #print(x.join())
