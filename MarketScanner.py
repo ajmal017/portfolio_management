@@ -16,7 +16,6 @@ class TestApp(EWrapper,EClient):
     def __init__(self, subscription: ScannerSubscription): #ticker, secType,exchange,currency,primaryExchange):
 
         EClient.__init__(self,self)
-        self.orderId = 0
         self.date = datetime.date.today().strftime("%d%m%Y")
         self.data = pd.DataFrame(columns=["rank", "ticker", "sec_type"])
         self.subscription = subscription
@@ -51,19 +50,31 @@ class TestApp(EWrapper,EClient):
         super().scannerDataEnd(reqId)
         print("ScannerDataEnd. ReqId:", reqId)
         self.cancelScannerSubscription(reqId)
+        self.done = True
         self.disconnect()
 
     def error(self, reqId:TickerId, errorCode:int, errorString:str):
         print("Error: ", reqId, " ", errorCode," ", errorString)
 
-
     def nextValidId(self, orderId: int):
         super().nextValidId(orderId)
-        self.orderId = orderId + 1
+
+        print("setting nextValidOrderId: {}".format(orderId))
+        self.nextValidOrderId = orderId
+        print("NextValidId:", orderId)
+        # ! [nextvalidid]
+
+        # we can start now
         self.start()
 
+    def nextOrderId(self):
+        oid = self.nextValidOrderId
+        self.nextValidOrderId += 1
+        return oid
+
     def start(self):
-        app
+        self.create_csv_files()
+        self.reqScannerSubscription(self.nextOrderId(), self.subscription, [], [])
 
 
 
@@ -78,8 +89,6 @@ def main():
     app = TestApp(scanSub)
     app.connect("127.0.0.1", 7497, 1)
 
-    app.create_csv_files()
-    app.reqScannerSubscription(app.nextValidId(app.orderId), scanSub, [], [])
     app.run()
 
 

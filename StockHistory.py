@@ -190,7 +190,6 @@ def momentum():
     app.run()
 
 
-
 momentum()
 
 

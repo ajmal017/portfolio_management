@@ -1,7 +1,5 @@
 import datetime
 import logging
-import threading
-import time
 from csv import DictWriter
 from threading import Timer
 import pandas as pd
@@ -14,9 +12,10 @@ from ibapi.order import Order
 from ibapi.order_state import OrderState
 from ibapi.wrapper import EWrapper, TickType  ##Incoming messages
 from ibapi.contract import Contract, ContractDetails
-from datetime import date
-import schedule
-import asyncio
+from functools import reduce
+import time
+
+
 
 class IntradayMomentum(EWrapper,EClient):
 
@@ -50,11 +49,7 @@ class IntradayMomentum(EWrapper,EClient):
         self.cr_columns = ["exec_id","realized_pnl"]
         self.ee_columns = ["date","exec_id", "ticker", "sec_type","quantity_sold","avg_price_sold"]
         self.me_columns = ["date", "exec_id", "ticker", "sec_type", "quantity_bought", "avg_price_bought"]
-        self.sh_columns = ["exec_id","realized_pnl",
-                          "date","exec_id", "ticker",
-                          "sec_type","quantity_sold",
-                          "avg_price_sold","quantity_bought",
-                          "avg_price_bought"]
+
 
 
         if os.path.isfile(self.scanner_path):
@@ -66,7 +61,6 @@ class IntradayMomentum(EWrapper,EClient):
         self.commission_report = self.check_file(self.cr_path,self.cr_columns)
         self.evening_executions = self.check_file(self.ee_path,self.ee_columns)
         self.morning_executions = self.check_file(self.me_path,self.me_columns)
-        self.strategy_history = self.check_file(self.sh_path, self.sh_columns)
 
 
     def nextValidId(self, orderId: int):
@@ -100,7 +94,7 @@ class IntradayMomentum(EWrapper,EClient):
 
 
         if self.isMorning:
-            row = {"date": self.today, "exec_id": execution.execId,
+            row = {"date": self.date, "exec_id": execution.execId,
                    "ticker": contract.symbol, "sec_type": contract.secType,
                    "quantity_bought": execution.shares,
                    "avg_price_bought": execution.avgPrice}
@@ -108,7 +102,7 @@ class IntradayMomentum(EWrapper,EClient):
             self.append_dict_as_row(self.me_path,row,self.me_columns)
 
         else:
-            row = {"date": self.today, "exec_id":execution.execId,
+            row = {"date": self.date, "exec_id":execution.execId,
                    "ticker": contract.symbol, "sec_type": contract.secType,
                    "quantity_sold": execution.shares, "avg_price_sold": execution.avgPrice}
 
@@ -143,7 +137,7 @@ class IntradayMomentum(EWrapper,EClient):
             print ("File exist at path: {}".format(path))
             data = pd.read_csv(path)
         else:
-            data = pd.DataFrame(columns=[columns]).to_csv(path, index=False)
+            data = pd.DataFrame(columns=columns).to_csv(path, index=False)
 
         return data
 
@@ -236,12 +230,16 @@ class IntradayMomentum(EWrapper,EClient):
         if len(ee) == 0 or ee is None:
             raise("Evening Executions did not establish")
 
-        data = me.merge(ee, how= "inner")
-        data = data.merge(cr, how="inner")
+        df_merged = pd.merge(ee, cr, on= ["exec_id"], how = "inner")
+        df_merged = pd.merge(me, df_merged, on = ["ticker", "date", "sec_type"], how = "inner")
 
-        data["return"] = 100 * data.realized_pnl / (data.AvgPrice_Bought*data.quantity_bought)
 
-        data.to_csv(self.sh_path, mode='a', header=False)
+        if os.path.isfile(self.sh_path):
+            df_merged.to_csv(self.sh_path, mode='a', header=False)
+        else:
+            df_merged.to_csv(self.sh_path, index= False)
+
+
 
     ##Call stop after 3 seconds to disconnect program
     def stop(self):
@@ -305,7 +303,7 @@ class IntradayMomentum(EWrapper,EClient):
 
 def morning():
     
-    strategy = IntradayMomentum(isMorning= True,invest_on_each=1000)
+    strategy = IntradayMomentum(isMorning= True,invest_on_each=1000, first_n_stock=5)
     strategy.connect("127.0.0.1", 7497, 1)
     Timer(20, strategy.stop).start()
     strategy.run()
@@ -318,4 +316,9 @@ def evening():
     Timer(25, strategy.stop).start()
     strategy.run()
 
+
 morning()
+
+time.sleep(30)
+
+evening()
