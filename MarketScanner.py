@@ -60,7 +60,10 @@ class TestApp(EWrapper,EClient):
     def nextValidId(self, orderId: int):
         super().nextValidId(orderId)
         self.orderId = orderId + 1
-        return self.orderId
+        self.start()
+
+    def start(self):
+        app
 
 
 

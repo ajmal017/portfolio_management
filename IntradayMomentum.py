@@ -20,7 +20,11 @@ import asyncio
 
 class IntradayMomentum(EWrapper,EClient):
 
-    def __init__(self, isMorning, quantity,first_n_stock = 5):
+    def __init__(self,
+                 isMorning,
+                 invest_on_each=None,
+                 first_n_stock = 5):
+
         EClient.__init__(self,self)
 
         self.nextValidOrderId = None
@@ -29,23 +33,29 @@ class IntradayMomentum(EWrapper,EClient):
         self.started = False
         self.globalCancelOnly = False
         self.first_n_stock = first_n_stock
-        self.quantity = quantity
+
+        if isMorning and invest_on_each is None:
+            raise("You need to give investment amount")
+
+        self.invest_on_each = invest_on_each
 
         self.scanner_path = "/Users/alperoner/PycharmProjects/PMP/IntradayMomentum/Scanner/{}_scanner.csv".format(self.date)
 
+        self.dp_path = "/Users/alperoner/PycharmProjects/PMP/IntraDayMomentum/DailyPrices"
         self.cr_path = "/Users/alperoner/PycharmProjects/PMP/IntraDayMomentum/Executions/{}_commission_report.csv".format(self.date)
         self.ee_path = "/Users/alperoner/PycharmProjects/PMP/IntraDayMomentum/Executions/{}_evening_executions.csv".format(self.date)
         self.me_path = "/Users/alperoner/PycharmProjects/PMP/IntraDayMomentum/Executions/{}_morning_executions.csv".format(self.date)
         self.sh_path =  "/Users/alperoner/PycharmProjects/PMP/IntraDayMomentum/strategy_history.csv"
 
         self.cr_columns = ["exec_id","realized_pnl"]
-        self.ee_columns = ["date","exec_id", "ticker","sec_type","quantity_sold","avg_price_sold"]
+        self.ee_columns = ["date","exec_id", "ticker", "sec_type","quantity_sold","avg_price_sold"]
         self.me_columns = ["date", "exec_id", "ticker", "sec_type", "quantity_bought", "avg_price_bought"]
         self.sh_columns = ["exec_id","realized_pnl",
                           "date","exec_id", "ticker",
                           "sec_type","quantity_sold",
                           "avg_price_sold","quantity_bought",
                           "avg_price_bought"]
+
 
         if os.path.isfile(self.scanner_path):
             self.scanner = pd.read_csv(self.scanner_path)
@@ -58,29 +68,6 @@ class IntradayMomentum(EWrapper,EClient):
         self.morning_executions = self.check_file(self.me_path,self.me_columns)
         self.strategy_history = self.check_file(self.sh_path, self.sh_columns)
 
-    def check_file(self, path, columns):
-
-        if os.path.isfile(path):
-            print ("File exist at path: {}".format(path))
-            data = pd.read_csv(path)
-        else:
-            data = pd.DataFrame(columns=[columns]).to_csv(path, index=False)
-
-        return data
-
-    def append_dict_as_row(self,file_name, dict_of_elem, field_names):
-        # Open file in append mode
-        with open(file_name, 'a+', newline='') as write_obj:
-            # Create a writer object from csv module
-            dict_writer = DictWriter(write_obj, fieldnames=field_names)
-            # Add dictionary as wor in the csv
-            dict_writer.writerow(dict_of_elem)
-
-
-    def nextOrderId(self):
-        oid = self.nextValidOrderId
-        self.nextValidOrderId += 1
-        return oid
 
     def nextValidId(self, orderId: int):
         super().nextValidId(orderId)
@@ -92,22 +79,6 @@ class IntradayMomentum(EWrapper,EClient):
 
         # we can start now
         self.start()
-
-    def start(self):
-        if self.started:
-            return
-
-        self.started = True
-
-        ##Questionable
-        if self.globalCancelOnly:
-            print("Executing GlobalCancel only")
-            self.reqGlobalCancel()
-        else:
-            self.routine()
-
-
-
 
     def orderStatus(self, orderId:OrderId , status:str, filled:float,
                     remaining:float, avgFillPrice:float, permId:int,
@@ -129,19 +100,26 @@ class IntradayMomentum(EWrapper,EClient):
 
 
         if self.isMorning:
-            row = {"date": [self.today], "exec_id":[execution.execId],
-                   "ticker": [contract.symbol],"sec_type": [contract.secType],
-                   "quantity_bought": [execution.cumQty], "avg_price_bought": [execution.avgPrice]}
+            row = {"date": self.today, "exec_id": execution.execId,
+                   "ticker": contract.symbol, "sec_type": contract.secType,
+                   "quantity_bought": execution.shares,
+                   "avg_price_bought": execution.avgPrice}
 
             self.append_dict_as_row(self.me_path,row,self.me_columns)
 
         else:
-            row = {"date": [self.today], "exec_id":[execution.execId],
-                   "ticker": [contract.symbol], "sec_type": [contract.secType],
-                   "quantity_sold": [execution.cumQty], "avg_price_sold": [execution.avgPrice]}
+            row = {"date": self.today, "exec_id":execution.execId,
+                   "ticker": contract.symbol, "sec_type": contract.secType,
+                   "quantity_sold": execution.shares, "avg_price_sold": execution.avgPrice}
 
             self.append_dict_as_row(self.ee_path, row, self.ee_columns)
 
+    def tickPrice(self, reqId:TickerId , tickType:TickType, price:float,
+                  attrib:TickAttrib):
+        print("TickerId: ", reqId, "Price: ", price)
+
+    def tickSnapshotEnd(self, reqId:int):
+        print("Snapshot ended")
 
     def execDetailsEnd(self, reqId:int):
         print("Execution ended")
@@ -151,12 +129,80 @@ class IntradayMomentum(EWrapper,EClient):
         print("CommissionReport.", commissionReport)
 
         if not self.isMorning:
-            row = {"exec_id": [commissionReport.execId], "realized_pnl": [commissionReport.realizedPNL]}
+            row = {"exec_id": commissionReport.execId, "realized_pnl": commissionReport.realizedPNL}
             self.append_dict_as_row(self.cr_path, row, self.cr_columns)
 
 
     def error(self, reqId:TickerId, errorCode:int, errorString:str):
         print("Error: ", reqId, " ", errorCode," ", errorString)
+
+
+    def check_file(self, path, columns):
+
+        if os.path.isfile(path):
+            print ("File exist at path: {}".format(path))
+            data = pd.read_csv(path)
+        else:
+            data = pd.DataFrame(columns=[columns]).to_csv(path, index=False)
+
+        return data
+
+    def append_dict_as_row(self,file_name, dict_of_elem, field_names):
+        # Open file in append mode
+        with open(file_name, 'a+', newline='') as write_obj:
+            # Create a writer object from csv module
+            dict_writer = DictWriter(write_obj, fieldnames=field_names)
+            # Add dictionary as wor in the csv
+            dict_writer.writerow(dict_of_elem)
+
+    def nextOrderId(self):
+        oid = self.nextValidOrderId
+        self.nextValidOrderId += 1
+        return oid
+
+    def start(self):
+        if self.started:
+            return
+
+        self.started = True
+
+        ##Questionable
+        if self.globalCancelOnly:
+            print("Executing GlobalCancel only")
+            self.reqGlobalCancel()
+        else:
+            self.routine()
+
+
+
+    def execute_orders(self,tickers, isMorning):
+
+        if isMorning:
+            action = "BUY"
+            price_dict = self.get_price_dict(tickers= tickers)
+            quantity_dict = self.calculate_quantities(price_dict= price_dict)
+
+            for ticker in tickers:
+                contract = self.get_contract(ticker)
+                order = self.get_order(quantity=quantity_dict[ticker], action= action)
+                self.placeOrder(self.nextOrderId(), contract, order)
+        else:
+
+            action = "SELL"
+            quantity_dict = self.get_morning_quantities()
+
+            for ticker in tickers:
+                contract = self.get_contract(ticker)
+                order = self.get_order(quantity=quantity_dict[ticker], action=action)
+                self.placeOrder(self.nextOrderId(), contract, order)
+
+
+    def get_morning_quantities(self):
+
+        morning_data = pd.read_csv(self.me_path)
+        morning_quantities = dict(zip(morning_data.ticker, morning_data.quantity_bought))
+        return morning_quantities
+
 
     def get_contract(self,ticker: str):
         contract = Contract()
@@ -166,6 +212,9 @@ class IntradayMomentum(EWrapper,EClient):
         contract.currency = "USD"
         return contract
 
+    def contract_list(self, tickers):
+        return [self.get_contract(ticker) for ticker in tickers]
+
     def get_order(self, quantity:int, action: str):
         order = Order()
         order.action = action
@@ -173,8 +222,7 @@ class IntradayMomentum(EWrapper,EClient):
         order.orderType = "MKT"
         return order
 
-    def contract_list(self, tickers):
-        return [self.get_contract(ticker) for ticker in tickers]
+
 
     def end_day(self):
 
@@ -200,23 +248,44 @@ class IntradayMomentum(EWrapper,EClient):
         self.done = True
         self.disconnect()
 
-    def execute_orders(self,contracts, order):
-        for contract in contracts:
-            self.placeOrder(self.nextOrderId(),contract, order)
 
-    def tickPrice(self, reqId:TickerId , tickType:TickType, price:float,
-                  attrib:TickAttrib):
-        print("TickerId: ", reqId, "Price: ", price)
+    def check_price(self, ticker):
 
-    def tickSnapshotEnd(self, reqId:int):
-        print("Snapshot ended")
+        file_name = "{}_{}_history.csv".format(ticker, self.date)
+        path = os.path.join(self.dp_path, file_name)
+        data = pd.read_csv(path)
 
+        if data is None or len(data) == 0:
+            raise ("Daily price data does not exist")
+        elif len(data) == 1:
+            price = data.close.values[0]
+        else:
+            raise ("More than one price to pick")
 
+        return price
 
+    def get_price_dict(self, tickers):
 
-    def getPrices(self, tickers):
-        print("")
+        price_dict = {}
+
+        for ticker in tickers:
+            price_dict[ticker] = self.check_price(ticker)
+
+        return price_dict
+
         ##Use daily prices in the folder to receive price and stock quantity data
+
+    def calculate_quantities(self, price_dict) -> {}:
+
+        quantity_dict = {}
+
+        for ticker, price in price_dict.items():
+            quantity_dict[ticker] = int(self.invest_on_each / price)
+
+        print(quantity_dict)
+        return quantity_dict
+
+
 
     def routine(self):
 
@@ -225,31 +294,28 @@ class IntradayMomentum(EWrapper,EClient):
             stocks = self.scanner.loc[0:end_index]
             tickers = stocks.ticker.values
 
-
-            order = self.get_order(quantity=self.quantity, action="BUY")
-
         else:
             stocks = pd.read_csv(self.me_path)
             tickers = stocks.ticker.values
-            order = self.get_order(quantity=self.quantity, action="SELL")
 
-        self.execute_orders(self.contract_list(tickers=tickers),order)
+
+        self.execute_orders(tickers, self.isMorning)
         print("Routine completed")
 
 
 def morning():
     
-    strategy = IntradayMomentum(isMorning= True,quantity=5)
+    strategy = IntradayMomentum(isMorning= True,invest_on_each=1000)
     strategy.connect("127.0.0.1", 7497, 1)
-    Timer(3, strategy.stop).start()
+    Timer(20, strategy.stop).start()
     strategy.run()
 
 def evening():
 
-    strategy = IntradayMomentum(isMorning= False,quantity=5)
+    strategy = IntradayMomentum(isMorning= False)
     strategy.connect("127.0.0.1", 7497, 1)
-    Timer(3, strategy.end_day).start()
-    Timer(5, strategy.stop).start()
+    Timer(20, strategy.end_day).start()
+    Timer(25, strategy.stop).start()
     strategy.run()
 
 morning()
