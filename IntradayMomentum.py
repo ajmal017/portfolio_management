@@ -12,8 +12,7 @@ from ibapi.order import Order
 from ibapi.order_state import OrderState
 from ibapi.wrapper import EWrapper, TickType  ##Incoming messages
 from ibapi.contract import Contract, ContractDetails
-from functools import reduce
-import time
+
 
 
 
@@ -50,8 +49,6 @@ class IntradayMomentum(EWrapper,EClient):
         self.ee_columns = ["date","exec_id", "ticker", "sec_type","quantity_sold","avg_price_sold"]
         self.me_columns = ["date", "exec_id", "ticker", "sec_type", "quantity_bought", "avg_price_bought"]
 
-
-
         if os.path.isfile(self.scanner_path):
             self.scanner = pd.read_csv(self.scanner_path)
         else:
@@ -66,7 +63,7 @@ class IntradayMomentum(EWrapper,EClient):
     def nextValidId(self, orderId: int):
         super().nextValidId(orderId)
 
-        logging.debug("setting nextValidOrderId: %d", orderId)
+        print("setting nextValidOrderId: {}".format(orderId))
         self.nextValidOrderId = orderId
         print("NextValidId:", orderId)
     # ! [nextvalidid]
@@ -91,7 +88,6 @@ class IntradayMomentum(EWrapper,EClient):
     def execDetails(self, reqId:int, contract:Contract, execution:Execution):
         print("ExecDetails. ", reqId, contract.symbol, contract.secType, contract.currency, execution.execId,
               execution.orderId, execution.shares,execution.avgPrice)
-
 
         if self.isMorning:
             row = {"date": self.date, "exec_id": execution.execId,
@@ -126,10 +122,8 @@ class IntradayMomentum(EWrapper,EClient):
             row = {"exec_id": commissionReport.execId, "realized_pnl": commissionReport.realizedPNL}
             self.append_dict_as_row(self.cr_path, row, self.cr_columns)
 
-
     def error(self, reqId:TickerId, errorCode:int, errorString:str):
         print("Error: ", reqId, " ", errorCode," ", errorString)
-
 
     def check_file(self, path, columns):
 
@@ -155,18 +149,16 @@ class IntradayMomentum(EWrapper,EClient):
         return oid
 
     def start(self):
+
         if self.started:
             return
-
         self.started = True
-
         ##Questionable
         if self.globalCancelOnly:
             print("Executing GlobalCancel only")
             self.reqGlobalCancel()
         else:
             self.routine()
-
 
 
     def execute_orders(self,tickers, isMorning):
@@ -213,7 +205,7 @@ class IntradayMomentum(EWrapper,EClient):
         order = Order()
         order.action = action
         order.totalQuantity = quantity
-        order.orderType = "MKT"
+        order.orderType = "MTL" ##Play with ordertype to maximize profits
         return order
 
 
@@ -235,14 +227,19 @@ class IntradayMomentum(EWrapper,EClient):
 
 
         if os.path.isfile(self.sh_path):
-            df_merged.to_csv(self.sh_path, mode='a', header=False)
+            df_merged.to_csv(self.sh_path, mode='a', header=False, index = False)
         else:
             df_merged.to_csv(self.sh_path, index= False)
 
 
+    def remove_files(self, paths):
+        for path in paths:
+            os.remove(path)
+
 
     ##Call stop after 3 seconds to disconnect program
     def stop(self):
+        #self.remove_files([self.me_path, self.ee_path, self.cr_path])
         self.done = True
         self.disconnect()
 
@@ -254,13 +251,14 @@ class IntradayMomentum(EWrapper,EClient):
         data = pd.read_csv(path)
 
         if data is None or len(data) == 0:
-            raise ("Daily price data does not exist")
+            raise("Daily price data does not exist")
         elif len(data) == 1:
             price = data.close.values[0]
         else:
-            raise ("More than one price to pick")
+            raise("More than one price to pick")
 
         return price
+
 
     def get_price_dict(self, tickers):
 
@@ -302,14 +300,12 @@ class IntradayMomentum(EWrapper,EClient):
 
 
 def morning():
-    
-    strategy = IntradayMomentum(isMorning= True,invest_on_each=1000, first_n_stock=5)
+    strategy = IntradayMomentum(isMorning= True, invest_on_each=1000, first_n_stock=10)
     strategy.connect("127.0.0.1", 7497, 1)
     Timer(20, strategy.stop).start()
     strategy.run()
 
 def evening():
-
     strategy = IntradayMomentum(isMorning= False)
     strategy.connect("127.0.0.1", 7497, 1)
     Timer(20, strategy.end_day).start()
@@ -319,6 +315,6 @@ def evening():
 
 morning()
 
-time.sleep(30)
+
 
 evening()

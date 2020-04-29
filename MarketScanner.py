@@ -67,6 +67,7 @@ class TestApp(EWrapper,EClient):
         # we can start now
         self.start()
 
+
     def nextOrderId(self):
         oid = self.nextValidOrderId
         self.nextValidOrderId += 1
@@ -114,3 +115,4 @@ if __name__ == "__main__":
     #while True:
      #   schedule.run_pending()
       #  time.sleep(30)
+
